@@ -706,7 +706,9 @@ class MemoryAsContextTransformer(Module):
         disable_flex_attn = False,
         cache = None,
         return_cache = False,
-        factorized_pos_emb = None
+        factorized_pos_emb = None,
+        return_hidden_states = False,
+        disable_memory_layers = None
     ):
 
         if return_loss:
@@ -789,15 +791,20 @@ class MemoryAsContextTransformer(Module):
 
         x = self.expand_streams(x)
 
-        for mem_hyper_conn, attn_hyper_conn, ff_hyper_conn, mem_qkv_layer_selector, mem, attn, ff in self.layers:
+        hidden_states = []
+
+        for layer_idx, (mem_hyper_conn, attn_hyper_conn, ff_hyper_conn, mem_qkv_layer_selector, mem, attn, ff) in enumerate(self.layers):
 
             retrieved = None
             attn_out_gates = None
             next_neural_mem_cache = None
 
             # maybe neural memory
+            # disable_memory_layers uses 1-indexed layer numbers matching neural_memory_layers config
+            layer_num = layer_idx + 1
+            mem_is_disabled = exists(disable_memory_layers) and layer_num in disable_memory_layers
 
-            if exists(mem):
+            if exists(mem) and not mem_is_disabled:
 
                 mem_input, add_residual = mem_hyper_conn(x)
 
@@ -851,7 +858,7 @@ class MemoryAsContextTransformer(Module):
 
             next_kv_caches.append(next_kv_cache)
 
-            if exists(mem):
+            if exists(mem) and not mem_is_disabled:
                 next_neural_mem_caches.append(next_neural_mem_cache)
 
             # feedforward
@@ -865,6 +872,9 @@ class MemoryAsContextTransformer(Module):
             mem_input_layers.append(ff_out)
 
             x = add_ff_residual(ff_out)
+
+            if return_hidden_states and not is_inferencing:
+                hidden_states.append(x.detach().clone())
 
         # taking care of cache first
         # for early return when processing long term mem tokens during inference
@@ -908,6 +918,18 @@ class MemoryAsContextTransformer(Module):
 
             x = x[:, :seq_len]
 
+            # process collected hidden states through the same excision pipeline
+            if return_hidden_states:
+                processed_hidden = []
+                for h in hidden_states:
+                    h = self.reduce_streams(h)
+                    h, _inv_seg = pad_and_segment_with_inverse(h, attn_window_size, inverse_remove_pad = False)
+                    h, _ = inverse_pack_mems(h)
+                    h = _inv_seg(h)
+                    h = h[:, :seq_len]
+                    processed_hidden.append(h)
+                hidden_states = processed_hidden
+
         # to logits
 
         x = self.norm(x)
@@ -915,6 +937,11 @@ class MemoryAsContextTransformer(Module):
         logits = self.to_logits(x)
 
         if not return_loss:
+            if return_hidden_states:
+                if not return_cache:
+                    return logits, hidden_states
+                return logits, hidden_states, next_cache
+
             if not return_cache:
                 return logits
 
