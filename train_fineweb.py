@@ -39,14 +39,14 @@ import wandb
 
 SEED               = 42
 SEQ_LEN            = 512
-BATCH_SIZE         = 2
-GRADIENT_ACCUMULATE_EVERY = 8
+BATCH_SIZE         = 4
+GRADIENT_ACCUMULATE_EVERY = 4
 LEARNING_RATE      = 2e-4
 LR_WARMUP_STEPS    = 1000
 LR_MIN             = 1e-5
-NUM_STEPS          = 200_000          # ~5-10B tokens at batch=8, seq=512
-VALIDATE_EVERY     = 500
-CHECKPOINT_EVERY   = 2000
+NUM_STEPS          = 10_000           # proof-of-concept; ~80M tokens
+VALIDATE_EVERY     = 200
+CHECKPOINT_EVERY   = 1000
 CHECKPOINT_DIR     = './checkpoints'
 
 TOKENIZER_NAME     = 'gpt2'           # ~50k vocab
@@ -61,8 +61,8 @@ NUM_PERSIST_MEM    = 4
 NUM_LONGTERM_MEM   = 4
 NEURAL_MEM_LAYERS  = (3, 5, 7)
 NEURAL_MEM_DEPTH   = 2
-NEURAL_MEM_SEGMENT_LEN   = 8
-NEURAL_MEM_BATCH_SIZE    = 64
+NEURAL_MEM_SEGMENT_LEN   = 32        # fewer scan chunks: 512/32=16 vs 512/8=64
+NEURAL_MEM_BATCH_SIZE    = 32        # smaller parallel chunk size
 NEURAL_MEM_QK_NORM       = True
 NEURAL_MEM_MOMENTUM      = True
 NEURAL_MEM_MOMENTUM_ORDER = 1
