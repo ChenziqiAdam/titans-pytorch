@@ -13,6 +13,7 @@
 # ///
 
 import os
+os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
 import math
 import tqdm
 import torch
@@ -38,8 +39,8 @@ import wandb
 
 SEED               = 42
 SEQ_LEN            = 512
-BATCH_SIZE         = 8
-GRADIENT_ACCUMULATE_EVERY = 4
+BATCH_SIZE         = 2
+GRADIENT_ACCUMULATE_EVERY = 8
 LEARNING_RATE      = 2e-4
 LR_WARMUP_STEPS    = 1000
 LR_MIN             = 1e-5
@@ -51,17 +52,17 @@ CHECKPOINT_DIR     = './checkpoints'
 TOKENIZER_NAME     = 'gpt2'           # ~50k vocab
 
 # model
-DIM                = 512
-DEPTH              = 12
-HEADS              = 8
+DIM                = 256
+DEPTH              = 8
+HEADS              = 4
 DIM_HEAD           = 64
 WINDOW_SIZE        = 64
 NUM_PERSIST_MEM    = 4
 NUM_LONGTERM_MEM   = 4
-NEURAL_MEM_LAYERS  = (3, 5, 7, 9, 11)
+NEURAL_MEM_LAYERS  = (3, 5, 7)
 NEURAL_MEM_DEPTH   = 2
 NEURAL_MEM_SEGMENT_LEN   = 8
-NEURAL_MEM_BATCH_SIZE    = 256
+NEURAL_MEM_BATCH_SIZE    = 64
 NEURAL_MEM_QK_NORM       = True
 NEURAL_MEM_MOMENTUM      = True
 NEURAL_MEM_MOMENTUM_ORDER = 1
@@ -72,8 +73,8 @@ NEURAL_MEM_QKV_DIFF_VIEWS = True
 STORE_ATTN_POOL_CHUNKS   = True
 PER_LAYER_LEARNED_LR     = True
 SLIDING_WINDOWS          = True
-USE_FLEX_ATTN            = True
-USE_ACCELERATED_SCAN     = True
+USE_FLEX_ATTN            = False
+USE_ACCELERATED_SCAN     = False
 
 # wandb
 PROJECT_NAME  = 'titans-mac-fineweb'
@@ -184,7 +185,10 @@ def load_checkpoint(accelerator, path):
 def main():
     set_seed(SEED)
 
-    accelerator = Accelerator(gradient_accumulation_steps=GRADIENT_ACCUMULATE_EVERY)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=GRADIENT_ACCUMULATE_EVERY,
+        mixed_precision='bf16',
+    )
 
     # tokenizer
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
@@ -256,10 +260,10 @@ def main():
                 accelerator.backward(loss)
                 total_loss += loss.item()
 
-        torch.nn.utils.clip_grad_norm_(accelerator.unwrap_model(model).parameters(), 1.0)
+        accelerator.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         scheduler.step()
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
 
         avg_loss = total_loss / GRADIENT_ACCUMULATE_EVERY
         if accelerator.is_main_process:
