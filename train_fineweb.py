@@ -187,7 +187,7 @@ def main():
 
     accelerator = Accelerator(
         gradient_accumulation_steps=GRADIENT_ACCUMULATE_EVERY,
-        mixed_precision='bf16',
+        mixed_precision='no',
     )
 
     # tokenizer
