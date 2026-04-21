@@ -33,6 +33,10 @@ def load_model_from_checkpoint(ckpt_dir, device):
 
     model = build_model(tokenizer.vocab_size).to(device)
 
+    # Clone model params to handle expanded (shared-memory) params from einops repeat
+    for name, param in model.named_parameters():
+        param.data = param.data.clone()
+
     weight_path = os.path.join(ckpt_dir, 'pytorch_model.bin')
     if os.path.exists(weight_path):
         state = torch.load(weight_path, map_location=device)

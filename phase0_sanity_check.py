@@ -166,6 +166,10 @@ def main():
                 state_dict = torch.load(ckpt_path, map_location='cpu')
             # Accelerate wraps the model; strip 'module.' prefix if present
             state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+            # NeuralMemory uses einops repeat() creating expanded (shared-memory) params
+            # that load_state_dict can't copy into. Clone all model params to make them contiguous.
+            for name, param in model.named_parameters():
+                param.data = param.data.clone()
             model.load_state_dict(state_dict, strict=True)
             loaded = True
             break

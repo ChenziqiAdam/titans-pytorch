@@ -37,16 +37,18 @@ def load_model_from_checkpoint(ckpt_dir, device):
 
     model = build_model(tokenizer.vocab_size).to(device)
 
+    # Clone model params to handle expanded (shared-memory) params from einops repeat
+    for name, param in model.named_parameters():
+        param.data = param.data.clone()
+
     # load weights
     weight_path = os.path.join(ckpt_dir, 'pytorch_model.bin')
     if os.path.exists(weight_path):
         state = torch.load(weight_path, map_location=device)
-        # accelerate wraps with 'module.' prefix sometimes
         if all(k.startswith('module.') for k in state):
             state = {k[len('module.'):]: v for k, v in state.items()}
         model.load_state_dict(state, strict=False)
     else:
-        # try safetensors
         from safetensors.torch import load_file
         sf_files = glob.glob(os.path.join(ckpt_dir, '*.safetensors'))
         if sf_files:
