@@ -145,12 +145,25 @@ def compute_dependency(model, batches, neural_mem_layers, per_layer, device):
             if per_layer:
                 kl_per   = []
                 flip_per = []
-                for layer_num in neural_mem_layers:
-                    lg = model(x, disable_memory_layers=(layer_num,))
-                    kl_per.append(kl_div(logits_full, lg).reshape(-1).cpu())
+                # Disable memory layers cumulatively (from last to first) to avoid
+                # breaking the weight_residual chain between memory layers.
+                # Layer order: (3, 5, 7) → ablate (7,), then (5, 7), then (3, 5, 7)
+                # Each step's marginal effect = that layer's contribution.
+                sorted_layers = sorted(neural_mem_layers, reverse=True)
+                disabled_so_far = []
+                prev_logits = logits_full
+                for layer_num in sorted_layers:
+                    disabled_so_far.append(layer_num)
+                    lg = model(x, disable_memory_layers=tuple(disabled_so_far))
+                    # Marginal KL: how much changed by adding this layer's ablation
+                    kl_per.append(kl_div(prev_logits, lg).reshape(-1).cpu())
                     flip_per.append(
-                        (logits_full.argmax(-1) != lg.argmax(-1)).float().reshape(-1).cpu()
+                        (prev_logits.argmax(-1) != lg.argmax(-1)).float().reshape(-1).cpu()
                     )
+                    prev_logits = lg
+                # Reverse so index 0 = layer 3, 1 = layer 5, 2 = layer 7
+                kl_per.reverse()
+                flip_per.reverse()
                 all_kl_per.append(torch.stack(kl_per, dim=1))     # (B*T, num_mem_layers)
                 all_flip_per.append(torch.stack(flip_per, dim=1))
 
