@@ -110,7 +110,9 @@ def compute_difficulty(model, batches, device):
 
     model.eval()
     with torch.no_grad():
-        for batch in batches:
+        for batch_idx, batch in enumerate(batches):
+            if batch_idx % 10 == 0:
+                print(f'  batch {batch_idx}/{len(batches)}', flush=True)
             # batch: (B, seq_len+1)
             x       = batch[:, :-1]   # (B, seq_len)
             targets = batch[:, 1:]    # (B, seq_len)
@@ -182,29 +184,29 @@ def main():
 
     device = torch.device(args.device)
 
-    print(f'Loading model from {args.checkpoint}...')
+    print(f'Loading model from {args.checkpoint}...', flush=True)
     model, tokenizer = load_model_from_checkpoint(args.checkpoint, device)
     model.eval()
-    print(f'Model loaded. Vocab size: {tokenizer.vocab_size}')
+    print(f'Model loaded. Vocab size: {tokenizer.vocab_size}', flush=True)
 
-    print(f'Streaming {args.num_batches} batches of eval data...')
+    print(f'Streaming {args.num_batches} batches of eval data...', flush=True)
     batches = get_eval_batches(
         tokenizer, args.seq_len, args.batch_size, args.num_batches, device
     )
-    print(f'Got {len(batches)} batches.')
+    print(f'Got {len(batches)} batches.', flush=True)
 
-    print('Computing token difficulty metrics...')
+    print('Computing token difficulty metrics...', flush=True)
     results = compute_difficulty(model, batches, device)
 
     import os
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
     torch.save(results, args.output)
-    print(f'Saved to {args.output}')
-    print(f'  metric_a shape: {results["metric_a"].shape}')
-    print(f'  metric_b shape: {results["metric_b"].shape}')
-    print(f'  metric_c shape: {results["metric_c"].shape}')
-    print(f'  mean settling layer: {results["metric_c"].mean():.2f}')
-    print(f'  mean entropy: {results["metric_b"].mean():.4f}')
+    print(f'Saved to {args.output}', flush=True)
+    print(f'  metric_a shape: {results["metric_a"].shape}', flush=True)
+    print(f'  metric_b shape: {results["metric_b"].shape}', flush=True)
+    print(f'  metric_c shape: {results["metric_c"].shape}', flush=True)
+    print(f'  mean settling layer: {results["metric_c"].mean():.2f}', flush=True)
+    print(f'  mean entropy: {results["metric_b"].mean():.4f}', flush=True)
 
 
 if __name__ == '__main__':
