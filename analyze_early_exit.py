@@ -210,67 +210,65 @@ def main():
     plt.close()
     print(f'Saved {path}', flush=True)
 
-    # ── 9. Mean exit reduction by nomem exit layer ────────────────────────
+    # ── 9. Per exit-layer: mean exit reduction ─────────────────────────
+    # For tokens exiting at each layer (without memory), show how much
+    # memory changes the exit layer (positive = memory helps exit earlier)
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Left: mean reduction per nomem exit layer
-    nomem_int = exit_nomem.astype(int)
-    layers_present = sorted(set(nomem_int))
-    mean_red, counts_per_layer, layer_labels = [], [], []
-    for l in layers_present:
-        mask = nomem_int == l
-        cnt = mask.sum()
-        if cnt == 0:
-            continue
-        mean_red.append(exit_red[mask].mean())
-        counts_per_layer.append(cnt)
-        layer_labels.append(l)
-
+    # Left: mean exit reduction per nomem exit layer
+    layers_range = np.arange(L)
+    mean_red = np.array([exit_red[exit_nomem.astype(int) == l].mean()
+                         if (exit_nomem.astype(int) == l).sum() > 0 else 0
+                         for l in layers_range])
+    counts_per_layer = np.array([(exit_nomem.astype(int) == l).sum() for l in layers_range])
+    colors = ['green' if v > 0 else 'red' for v in mean_red]
     ax = axes[0]
-    bars = ax.bar(range(len(layer_labels)), mean_red, color='steelblue')
-    ax.set_xticks(range(len(layer_labels)))
-    ax.set_xticklabels([str(l) for l in layer_labels])
+    bars = ax.bar(layers_range, mean_red, color=colors, alpha=0.7)
     ax.set_xlabel('Exit layer WITHOUT memory')
-    ax.set_ylabel('Mean exit reduction (layers saved by memory)')
-    ax.set_title('How much does memory help, by nomem exit layer?')
-    ax.axhline(0, color='red', linestyle='--', alpha=0.7)
-    for i, (m, c) in enumerate(zip(mean_red, counts_per_layer)):
-        ax.text(i, m + 0.02, f'n={c:,}', ha='center', va='bottom', fontsize=7)
+    ax.set_ylabel('Mean exit reduction (layers)')
+    ax.set_title('How much does memory shift exit layer?\n(positive = exits earlier with memory)')
+    ax.set_xticks(layers_range)
+    ax.axhline(0, color='black', linewidth=0.5)
+    # annotate with token counts
+    for i, (bar, cnt) in enumerate(zip(bars, counts_per_layer)):
+        if cnt > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                    f'n={cnt:,}', ha='center', va='bottom' if mean_red[i] >= 0 else 'top',
+                    fontsize=7)
 
     # Right: distribution of exit reduction per nomem exit layer (box plot)
     ax = axes[1]
     box_data = []
     box_labels = []
-    for l in layers_present:
-        mask = nomem_int == l
-        if mask.sum() > 0:
+    for l in layers_range:
+        mask = exit_nomem.astype(int) == l
+        if mask.sum() > 10:
             box_data.append(exit_red[mask])
             box_labels.append(str(l))
-    bp = ax.boxplot(box_data, labels=box_labels, showfliers=False, patch_artist=True)
-    for patch in bp['boxes']:
-        patch.set_facecolor('lightsteelblue')
-    ax.set_xlabel('Exit layer WITHOUT memory')
-    ax.set_ylabel('Exit reduction (layers)')
-    ax.set_title('Exit reduction distribution by nomem exit layer')
-    ax.axhline(0, color='red', linestyle='--', alpha=0.7)
+    if box_data:
+        bp = ax.boxplot(box_data, labels=box_labels, showfliers=False, patch_artist=True)
+        for patch in bp['boxes']:
+            patch.set_facecolor('lightblue')
+        ax.set_xlabel('Exit layer WITHOUT memory')
+        ax.set_ylabel('Exit reduction (layers)')
+        ax.set_title('Exit reduction distribution per layer\n(box = IQR, no outliers)')
+        ax.axhline(0, color='red', linewidth=0.5, linestyle='--')
 
     plt.tight_layout()
-    path = os.path.join(args.output_dir, 'exit_reduction_by_nomem_layer.png')
+    path = os.path.join(args.output_dir, 'exit_reduction_per_layer.png')
     plt.savefig(path, dpi=150)
     plt.close()
     print(f'Saved {path}', flush=True)
 
-    # ── 10. Per-layer transition table (printed) ─────────────────────────
-    print(f'\n=== Exit layer change breakdown (nomem → mem) ===', flush=True)
-    print(f'{"nomem_layer":>12} {"count":>8} {"mean_red":>10} {"med_red":>10} {"red>0%":>8} {"red<0%":>8}', flush=True)
-    for l in layers_present:
-        mask = nomem_int == l
+    # Print summary table
+    print(f'\n=== Exit reduction by nomem exit layer ===', flush=True)
+    print(f'  {"Layer":>5}  {"Count":>8}  {"Mean Δ":>8}  {"Median Δ":>8}  {"% helped":>8}', flush=True)
+    for l in layers_range:
+        mask = exit_nomem.astype(int) == l
         cnt = mask.sum()
-        if cnt == 0:
-            continue
-        red_vals = exit_red[mask]
-        print(f'{l:>12d} {cnt:>8,d} {red_vals.mean():>10.3f} {np.median(red_vals):>10.1f} '
-              f'{(red_vals > 0).mean():>7.1%} {(red_vals < 0).mean():>7.1%}', flush=True)
+        if cnt > 0:
+            red_l = exit_red[mask]
+            print(f'  {l:>5d}  {cnt:>8,}  {red_l.mean():>8.3f}  {np.median(red_l):>8.1f}  {(red_l > 0).mean():>7.1%}', flush=True)
 
     print(f'\nAll outputs saved to {args.output_dir}', flush=True)
 
