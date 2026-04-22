@@ -58,41 +58,83 @@ def load_model_from_checkpoint(ckpt_dir, device):
 
 
 def get_eval_batches(tokenizer, seq_len=512, batch_size=4, num_batches=200, device='cuda'):
-    from datasets import load_dataset
-    import os
-
-    try:
-        ds = load_dataset(
-            'HuggingFaceFW/fineweb-edu',
-            name='sample-10BT',
-            split='train',
-            streaming=True,
-        )
-    except Exception as e:
-        print(f'Streaming failed ({e}), trying offline cache...', flush=True)
-        os.environ['HF_DATASETS_OFFLINE'] = '1'
-        ds = load_dataset(
-            'HuggingFaceFW/fineweb-edu',
-            name='sample-10BT',
-            split='train',
-            streaming=True,
-        )
-
-    buf, batches = [], []
+    import glob
     total_needed = num_batches * batch_size
+
+    sources = [
+        ('HF streaming', _load_from_hf_streaming),
+        ('cached parquet', _load_from_cached_parquet),
+        ('wikitext', _load_wikitext),
+    ]
+
+    for name, loader_fn in sources:
+        try:
+            print(f'  Trying data source: {name}...', flush=True)
+            text_iter = loader_fn()
+            batches = _tokenize_to_batches(text_iter, tokenizer, seq_len, batch_size, total_needed, device)
+            if len(batches) >= num_batches:
+                return batches[:num_batches]
+            print(f'  {name}: only got {len(batches)} batches, need {num_batches}', flush=True)
+        except Exception as e:
+            print(f'  {name} failed: {e}', flush=True)
+
+    raise RuntimeError('Could not load eval data from any source')
+
+
+def _load_from_hf_streaming():
+    from datasets import load_dataset
+    ds = load_dataset(
+        'HuggingFaceFW/fineweb-edu', name='sample-10BT',
+        split='train', streaming=True,
+    )
     for example in ds:
-        ids = tokenizer.encode(example['text'], add_special_tokens=False)
+        yield example['text']
+
+
+def _load_from_cached_parquet():
+    import os, glob
+    hf_cache = os.path.expanduser('~/.cache/huggingface/datasets')
+    patterns = [
+        os.path.join(hf_cache, '**/*fineweb*/**/*.parquet'),
+        os.path.join(hf_cache, 'downloads/**/*.parquet'),
+    ]
+    parquet_files = []
+    for p in patterns:
+        parquet_files.extend(glob.glob(p, recursive=True))
+    if not parquet_files:
+        raise FileNotFoundError('No cached parquet files found')
+    print(f'    Found {len(parquet_files)} cached parquet files', flush=True)
+    import pyarrow.parquet as pq
+    for f in sorted(parquet_files)[:5]:
+        table = pq.read_table(f, columns=['text'])
+        for row in table.to_pydict()['text']:
+            yield row
+
+
+def _load_wikitext():
+    from datasets import load_dataset
+    ds = load_dataset('wikitext', 'wikitext-103-raw-v1', split='test')
+    for example in ds:
+        if example['text'].strip():
+            yield example['text']
+
+
+def _tokenize_to_batches(text_iter, tokenizer, seq_len, batch_size, total_needed, device):
+    buf = []
+    chunks = []
+    for text in text_iter:
+        ids = tokenizer.encode(text, add_special_tokens=False)
         ids.append(tokenizer.eos_token_id)
         buf.extend(ids)
-        while len(buf) >= seq_len + 1 and len(batches) < total_needed:
+        while len(buf) >= seq_len + 1 and len(chunks) < total_needed:
             chunk = torch.tensor(buf[:seq_len + 1], dtype=torch.long, device=device)
-            buf   = buf[seq_len:]
-            batches.append(chunk)
-        if len(batches) >= total_needed:
+            buf = buf[seq_len:]
+            chunks.append(chunk)
+        if len(chunks) >= total_needed:
             break
     result = []
-    for i in range(0, len(batches), batch_size):
-        b = batches[i:i+batch_size]
+    for i in range(0, len(chunks), batch_size):
+        b = chunks[i:i + batch_size]
         if len(b) == batch_size:
             result.append(torch.stack(b))
     return result
