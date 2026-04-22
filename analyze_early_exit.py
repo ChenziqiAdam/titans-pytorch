@@ -162,6 +162,54 @@ def main():
     plt.close()
     print(f'Saved {path}', flush=True)
 
+    # ── 7. Joint exit layer comparison (mem vs nomem) ──────────────────
+    # 2D heatmap: x = exit_layer_mem, y = exit_layer_nomem, color = count
+    L = int(max(exit_mem.max(), exit_nomem.max())) + 1
+    joint = np.zeros((L, L), dtype=int)
+    for em_val, en_val in zip(exit_mem.astype(int), exit_nomem.astype(int)):
+        joint[en_val, em_val] += 1
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    im = ax.imshow(joint, origin='lower', cmap='Blues', aspect='equal',
+                   norm=plt.matplotlib.colors.LogNorm(vmin=1, vmax=joint.max()))
+    ax.set_xlabel('Exit layer WITH memory')
+    ax.set_ylabel('Exit layer WITHOUT memory')
+    ax.set_title('Exit layer: memory vs no memory (log-scale counts)')
+    ax.set_xticks(range(L))
+    ax.set_yticks(range(L))
+    # diagonal line (no change)
+    ax.plot([-0.5, L - 0.5], [-0.5, L - 0.5], 'r--', alpha=0.7, label='no change')
+    ax.legend(loc='upper left')
+    fig.colorbar(im, ax=ax, label='Token count')
+    # annotate cells with counts > 0
+    for i in range(L):
+        for j in range(L):
+            if joint[i, j] > 0:
+                ax.text(j, i, f'{joint[i, j]:,}' if joint[i, j] < 10000 else f'{joint[i, j] / 1000:.0f}k',
+                        ha='center', va='center', fontsize=6,
+                        color='white' if joint[i, j] > joint.max() * 0.3 else 'black')
+    plt.tight_layout()
+    path = os.path.join(args.output_dir, 'exit_layer_joint_heatmap.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f'Saved {path}', flush=True)
+
+    # ── 8. Side-by-side histograms ───────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(8, 4))
+    bins = np.arange(-0.5, L + 0.5, 1)
+    ax.hist(exit_mem, bins=bins, alpha=0.6, label='With memory', density=True)
+    ax.hist(exit_nomem, bins=bins, alpha=0.6, label='Without memory', density=True)
+    ax.set_xlabel('Exit layer')
+    ax.set_ylabel('Fraction of tokens')
+    ax.set_title('Exit layer distribution: memory vs no memory')
+    ax.set_xticks(range(L))
+    ax.legend()
+    plt.tight_layout()
+    path = os.path.join(args.output_dir, 'exit_layer_comparison_hist.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f'Saved {path}', flush=True)
+
     print(f'\nAll outputs saved to {args.output_dir}', flush=True)
 
 
