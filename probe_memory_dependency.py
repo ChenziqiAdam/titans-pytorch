@@ -59,24 +59,36 @@ def load_model_from_checkpoint(ckpt_dir, device):
 
 def get_eval_batches(tokenizer, seq_len=512, batch_size=4, num_batches=200, device='cuda'):
     from datasets import load_dataset
-    ds = load_dataset(
-        'HuggingFaceFW/fineweb-edu',
-        name='sample-10BT',
-        split='train',
-        streaming=True,
-    )
+    import os
+
+    try:
+        ds = load_dataset(
+            'HuggingFaceFW/fineweb-edu',
+            name='sample-10BT',
+            split='train',
+            streaming=True,
+        )
+    except Exception as e:
+        print(f'Streaming failed ({e}), trying offline cache...', flush=True)
+        os.environ['HF_DATASETS_OFFLINE'] = '1'
+        ds = load_dataset(
+            'HuggingFaceFW/fineweb-edu',
+            name='sample-10BT',
+            split='train',
+            streaming=True,
+        )
+
     buf, batches = [], []
+    total_needed = num_batches * batch_size
     for example in ds:
         ids = tokenizer.encode(example['text'], add_special_tokens=False)
         ids.append(tokenizer.eos_token_id)
         buf.extend(ids)
-        while len(buf) >= seq_len + 1:
+        while len(buf) >= seq_len + 1 and len(batches) < total_needed:
             chunk = torch.tensor(buf[:seq_len + 1], dtype=torch.long, device=device)
             buf   = buf[seq_len:]
             batches.append(chunk)
-            if len(batches) >= num_batches * batch_size:
-                break
-        if len(batches) >= num_batches * batch_size:
+        if len(batches) >= total_needed:
             break
     result = []
     for i in range(0, len(batches), batch_size):
