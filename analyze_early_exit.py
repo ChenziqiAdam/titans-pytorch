@@ -210,6 +210,68 @@ def main():
     plt.close()
     print(f'Saved {path}', flush=True)
 
+    # ── 9. Mean exit reduction by nomem exit layer ────────────────────────
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Left: mean reduction per nomem exit layer
+    nomem_int = exit_nomem.astype(int)
+    layers_present = sorted(set(nomem_int))
+    mean_red, counts_per_layer, layer_labels = [], [], []
+    for l in layers_present:
+        mask = nomem_int == l
+        cnt = mask.sum()
+        if cnt == 0:
+            continue
+        mean_red.append(exit_red[mask].mean())
+        counts_per_layer.append(cnt)
+        layer_labels.append(l)
+
+    ax = axes[0]
+    bars = ax.bar(range(len(layer_labels)), mean_red, color='steelblue')
+    ax.set_xticks(range(len(layer_labels)))
+    ax.set_xticklabels([str(l) for l in layer_labels])
+    ax.set_xlabel('Exit layer WITHOUT memory')
+    ax.set_ylabel('Mean exit reduction (layers saved by memory)')
+    ax.set_title('How much does memory help, by nomem exit layer?')
+    ax.axhline(0, color='red', linestyle='--', alpha=0.7)
+    for i, (m, c) in enumerate(zip(mean_red, counts_per_layer)):
+        ax.text(i, m + 0.02, f'n={c:,}', ha='center', va='bottom', fontsize=7)
+
+    # Right: distribution of exit reduction per nomem exit layer (box plot)
+    ax = axes[1]
+    box_data = []
+    box_labels = []
+    for l in layers_present:
+        mask = nomem_int == l
+        if mask.sum() > 0:
+            box_data.append(exit_red[mask])
+            box_labels.append(str(l))
+    bp = ax.boxplot(box_data, labels=box_labels, showfliers=False, patch_artist=True)
+    for patch in bp['boxes']:
+        patch.set_facecolor('lightsteelblue')
+    ax.set_xlabel('Exit layer WITHOUT memory')
+    ax.set_ylabel('Exit reduction (layers)')
+    ax.set_title('Exit reduction distribution by nomem exit layer')
+    ax.axhline(0, color='red', linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
+    path = os.path.join(args.output_dir, 'exit_reduction_by_nomem_layer.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f'Saved {path}', flush=True)
+
+    # ── 10. Per-layer transition table (printed) ─────────────────────────
+    print(f'\n=== Exit layer change breakdown (nomem → mem) ===', flush=True)
+    print(f'{"nomem_layer":>12} {"count":>8} {"mean_red":>10} {"med_red":>10} {"red>0%":>8} {"red<0%":>8}', flush=True)
+    for l in layers_present:
+        mask = nomem_int == l
+        cnt = mask.sum()
+        if cnt == 0:
+            continue
+        red_vals = exit_red[mask]
+        print(f'{l:>12d} {cnt:>8,d} {red_vals.mean():>10.3f} {np.median(red_vals):>10.1f} '
+              f'{(red_vals > 0).mean():>7.1%} {(red_vals < 0).mean():>7.1%}', flush=True)
+
     print(f'\nAll outputs saved to {args.output_dir}', flush=True)
 
 
