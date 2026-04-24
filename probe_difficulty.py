@@ -73,17 +73,26 @@ def get_eval_batches(tokenizer, seq_len=512, batch_size=4, num_batches=200, devi
         ('wikitext', _load_wikitext),
     ]
 
+    best = None
     for name, loader_fn in sources:
         try:
             print(f'  Trying data source: {name}...', flush=True)
             text_iter = loader_fn()
             batches = _tokenize_to_batches(text_iter, tokenizer, seq_len, batch_size, total_needed, device)
             if len(batches) >= num_batches:
+                print(f'  Using {name} ({len(batches)} batches)', flush=True)
                 return batches[:num_batches]
-            print(f'  {name}: only got {len(batches)} batches, need {num_batches}', flush=True)
+            if batches and (best is None or len(batches) > len(best)):
+                best = batches
+                print(f'  {name}: got {len(batches)} batches (fewer than {num_batches}, keeping as fallback)', flush=True)
+            else:
+                print(f'  {name}: only got {len(batches)} batches, need {num_batches}', flush=True)
         except Exception as e:
             print(f'  {name} failed: {e}', flush=True)
 
+    if best:
+        print(f'  Warning: using best available {len(best)} batches (requested {num_batches})', flush=True)
+        return best
     raise RuntimeError('Could not load eval data from any source')
 
 
