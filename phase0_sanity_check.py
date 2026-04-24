@@ -66,10 +66,17 @@ def _text_iter_fineweb():
 
 def _text_iter_wikitext():
     from datasets import load_dataset
-    ds = load_dataset('wikitext', 'wikitext-103-raw-v1', split='validation')
-    for example in ds:
-        if example['text'].strip():
-            yield example['text']
+    # Try raw-v1 first, fall back to cached v1
+    for config in ('wikitext-103-raw-v1', 'wikitext-103-v1'):
+        try:
+            ds = load_dataset('wikitext', config, split='validation')
+            for example in ds:
+                if example['text'].strip():
+                    yield example['text']
+            return
+        except Exception:
+            continue
+    raise RuntimeError('No wikitext-103 config found (tried raw-v1 and v1)')
 
 
 class EvalDataset(IterableDataset):
@@ -78,30 +85,16 @@ class EvalDataset(IterableDataset):
         self.tokenizer = tokenizer
         self.seq_len   = seq_len
 
-    def _get_text_iter(self):
-        sources = [('FineWeb-Edu', _text_iter_fineweb), ('WikiText-103', _text_iter_wikitext)]
-        for name, fn in sources:
-            try:
-                print(f'  Trying data source: {name}...', flush=True)
-                it = fn()
-                next(it)  # probe one item
-                import itertools
-                return name, itertools.chain([next(fn())], fn())
-            except Exception as e:
-                print(f'  {name} failed: {e}', flush=True)
-        raise RuntimeError('Could not load eval data from any source')
-
     def __iter__(self):
+        import itertools
         sources = [('FineWeb-Edu', _text_iter_fineweb), ('WikiText-103', _text_iter_wikitext)]
         text_iter = None
         for name, fn in sources:
             try:
                 print(f'  Trying data source: {name}...', flush=True)
-                text_iter = fn()
-                # probe
-                first = next(text_iter)
-                import itertools
-                text_iter = itertools.chain([first], text_iter)
+                it = fn()
+                first = next(it)  # force lazy HF init to run now
+                text_iter = itertools.chain([first], it)
                 print(f'  Using: {name}', flush=True)
                 break
             except Exception as e:

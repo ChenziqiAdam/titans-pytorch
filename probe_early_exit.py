@@ -120,10 +120,16 @@ def _load_from_cached_parquet():
 
 def _load_wikitext():
     from datasets import load_dataset
-    ds = load_dataset('wikitext', 'wikitext-103-raw-v1', split='test')
-    for example in ds:
-        if example['text'].strip():
-            yield example['text']
+    for config in ('wikitext-103-raw-v1', 'wikitext-103-v1'):
+        try:
+            ds = load_dataset('wikitext', config, split='test')
+            for example in ds:
+                if example['text'].strip():
+                    yield example['text']
+            return
+        except Exception:
+            continue
+    raise RuntimeError('No wikitext-103 config found (tried raw-v1 and v1)')
 
 
 def _tokenize_to_batches(text_iter, tokenizer, seq_len, batch_size, total_needed, device):
