@@ -57,22 +57,61 @@ USE_ACCELERATED_SCAN      = False
 NUM_EVAL_BATCHES     = 50   # ~50 * 4 * 512 = ~100k tokens, fast enough
 
 
-class FineWebDataset(IterableDataset):
-    def __init__(self, tokenizer, seq_len, buffer_tokens=500_000):
-        from datasets import load_dataset
-        self.ds = load_dataset(
-            'HuggingFaceFW/fineweb-edu',
-            name='sample-10BT',
-            split='train',
-            streaming=True,
-        )
+def _text_iter_fineweb():
+    from datasets import load_dataset
+    ds = load_dataset('HuggingFaceFW/fineweb-edu', name='sample-10BT', split='train', streaming=True)
+    for example in ds:
+        yield example['text']
+
+
+def _text_iter_wikitext():
+    from datasets import load_dataset
+    ds = load_dataset('wikitext', 'wikitext-103-raw-v1', split='validation')
+    for example in ds:
+        if example['text'].strip():
+            yield example['text']
+
+
+class EvalDataset(IterableDataset):
+    """Streams text from FineWeb-Edu, falling back to WikiText-103 validation."""
+    def __init__(self, tokenizer, seq_len):
         self.tokenizer = tokenizer
         self.seq_len   = seq_len
 
+    def _get_text_iter(self):
+        sources = [('FineWeb-Edu', _text_iter_fineweb), ('WikiText-103', _text_iter_wikitext)]
+        for name, fn in sources:
+            try:
+                print(f'  Trying data source: {name}...', flush=True)
+                it = fn()
+                next(it)  # probe one item
+                import itertools
+                return name, itertools.chain([next(fn())], fn())
+            except Exception as e:
+                print(f'  {name} failed: {e}', flush=True)
+        raise RuntimeError('Could not load eval data from any source')
+
     def __iter__(self):
+        sources = [('FineWeb-Edu', _text_iter_fineweb), ('WikiText-103', _text_iter_wikitext)]
+        text_iter = None
+        for name, fn in sources:
+            try:
+                print(f'  Trying data source: {name}...', flush=True)
+                text_iter = fn()
+                # probe
+                first = next(text_iter)
+                import itertools
+                text_iter = itertools.chain([first], text_iter)
+                print(f'  Using: {name}', flush=True)
+                break
+            except Exception as e:
+                print(f'  {name} failed: {e}', flush=True)
+        if text_iter is None:
+            raise RuntimeError('Could not load eval data from any source')
+
         buf = []
-        for example in self.ds:
-            ids = self.tokenizer.encode(example['text'], add_special_tokens=False)
+        for text in text_iter:
+            ids = self.tokenizer.encode(text, add_special_tokens=False)
             ids.append(self.tokenizer.eos_token_id)
             buf.extend(ids)
             while len(buf) >= self.seq_len + 1:
@@ -179,10 +218,9 @@ def main():
 
     model = model.to(device)
 
-    # Eval data — use a fresh stream (different offset from training)
-    eval_ds = FineWebDataset(tokenizer, SEQ_LEN)
-    # Skip first 500k tokens to avoid overlap with early training data
-    eval_loader = DataLoader(eval_ds, batch_size=BATCH_SIZE, num_workers=2)
+    # Eval data — tries FineWeb-Edu first, falls back to WikiText-103 validation
+    eval_ds = EvalDataset(tokenizer, SEQ_LEN)
+    eval_loader = DataLoader(eval_ds, batch_size=BATCH_SIZE, num_workers=0)
 
     print(f'\nEvaluating WITH memory ({NUM_EVAL_BATCHES} batches)...')
     ppl_with_mem = compute_ppl(model, eval_loader, device, disable_memory_layers=None)
